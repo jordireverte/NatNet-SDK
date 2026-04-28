@@ -1,1 +1,17 @@
 __pycache__
+
+.env
+.venv
+venv/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+.claude/
+.planning/
