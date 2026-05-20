@@ -1,0 +1,143 @@
+import sys
+import time
+import math
+import numpy as np
+import pyigtl  # Connexió nativa amb 3D Slicer
+from NatNetClient import NatNetClient
+
+# Diccionari global per guardar el frame actual de Motive
+# Clau: ID de l'objecte, Valor: [posició_global, rotació_quaternion]
+rigid_bodies_data = {}
+
+def receive_rigid_body_frame(new_id, position, rotation):
+    """Callback asíncron que s'executa per cada Rigid Body de Motive."""
+    global rigid_bodies_data
+    rigid_bodies_data[new_id] = [position, rotation]
+
+def look_at_target_relative(p_rel):
+    """
+    Calcula la matriu 4x4 perquè el transductor, situat a la posició relativa 'p_rel',
+    estigui mirant directament a l'origen [0, 0, 0] (on es troba el Pacient).
+    """
+    # La font (source) és la posició relativa del transductor (en mm)
+    source_pos = np.array(p_rel)
+    # La diana (target) és l'origen de coordenades del pacient
+    target_pos = np.array([0.0, 0.0, 0.0])
+
+    # 1. Vector de direcció: Des del transductor cap al pacient
+    forward = target_pos - source_pos
+    forward_norm = np.linalg.norm(forward)
+    
+    if forward_norm == 0:
+        return np.eye(4)
+    
+    forward = forward / forward_norm  # Vector Z unitari d'apuntat
+
+    # 2. Vector temporal "amunt" per calcular l'orientació lateral (ortogonalitat)
+    up_temp = np.array([0.0, 1.0, 0.0])
+    if abs(np.dot(forward, up_temp)) > 0.99:
+        up_temp = np.array([1.0, 0.0, 0.0])
+
+    # 3. Productes vectorials per obtenir els eixos X (right) i Y (up) de la matriu
+    right = np.cross(up_temp, forward)
+    right = right / np.linalg.norm(right)
+    
+    up = np.cross(forward, right)
+
+    # 4. Construcció de la matriu homogènia 4x4 de transformació
+    matrix = np.array([
+        [right[0], up[0], forward[0], source_pos[0]],
+        [right[1], up[1], forward[1], source_pos[1]],
+        [right[2], up[2], forward[2], source_pos[2]],
+        [0.0,      0.0,   0.0,        1.0]
+    ])
+    return matrix
+
+if __name__ == "__main__":
+    optionsDict = {"clientAddress": "127.0.0.1", "serverAddress": "127.0.0.1"}
+    streaming_client = NatNetClient()
+
+    print("====================================================")
+    print("    PIPELINE REAL DE TERÀPIA FUS (MOTIVE -> SLICER) ")
+    print("====================================================")
+
+    # 1. Configuració de la xarxa local per a l'OptiTrack
+    cast_choice = input("Selecciona xarxa de Motive (0 per Multicast, 1 per Unicast): ")
+    optionsDict["use_multicast"] = True if int(cast_choice) == 0 else False
+    streaming_client.set_use_multicast(optionsDict["use_multicast"])
+
+    client_ip = input("IP d'aquest PC (Client) [Intro per 127.0.0.1]: ") or "127.0.0.1"
+    server_ip = input("IP de Motive (Servidor) [Intro per 127.0.0.1]: ") or "127.0.0.1"
+    streaming_client.set_client_address(client_ip)
+    streaming_client.set_server_address(server_ip)
+
+    # 2. Inicialització del Servidor OpenIGTLink (Port 18944)
+    igtl_port = 18944
+    print(f"\n[INFO] Inicialitzant Servidor OpenIGTLink al port {igtl_port}...")
+    igtl_server = pyigtl.OpenIGTLinkServer(port=igtl_port)
+
+    # 3. Activació del client de tracking de Motive
+    streaming_client.rigid_body_listener = receive_rigid_body_frame
+    streaming_client.set_print_level(0)
+
+    if not streaming_client.run("d"):
+        print("[ERROR] No s'ha pogut arrencar el mòdul NatNetClient.")
+        sys.exit(1)
+
+    time.sleep(1)
+    if not streaming_client.connected():
+        print("[ERROR] Connexió fallida amb Motive. Revisa el Streaming de la càmera.")
+        sys.exit(2)
+
+    print("\n[OK] Pipeline connectat amb èxit!")
+    print("Escoltant dades de la càmera i recalculant orientació cap al pacient...")
+    print("Prem Ctrl+C per aturar el programa.\n")
+
+    try:
+        ID_REFERENCIA = 1  # L'ID de la base del Pacient (origen 0,0,0)
+
+        # Matriu identitat fixa per al Pacient (perquè Slicer el col·loqui al centre de l'escena)
+        matriu_pacient_fixa = np.array([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ])
+
+        while True:
+            # Comprovem en memòria que la càmera estigui enviant dades i vegi el Pacient
+            if rigid_bodies_data and (ID_REFERENCIA in rigid_bodies_data):
+                
+                # 1. ENVIEM EL PACIENT (Sempre a l'origen virtual 0,0,0 de Slicer)
+                msg_pacient = pyigtl.TransformMessage(matriu_pacient_fixa, device_name="PacientReferencia")
+                igtl_server.send_message(msg_pacient)
+                
+                # Obtenim la posició global real que la càmera veu de la referència
+                p_ref = rigid_bodies_data[ID_REFERENCIA][0]
+                
+                # 2. ITEREM PER TROBAR EL TRANSDUCTOR
+                for body_id, data in rigid_bodies_data.items():
+                    if body_id != ID_REFERENCIA:
+                        p_glob = data[0]  # Posició global real del transductor (en metres)
+                        
+                        # CANVI DE BASE: Resta vectorial (Motive treballa en metres)
+                        p_rel = [
+                            (p_glob[0] - p_ref[0]) * 1000.0,  # Passem a mil·limètres per a Slicer
+                            (p_glob[1] - p_ref[1]) * 1000.0,
+                            (p_glob[2] - p_ref[2]) * 1000.0
+                        ]
+                        
+                        # CÀLCUL DE LA MATRIU DE TERÀPIA (LOOK AT): 
+                        # Ignorem la rotació lliure de Motive i forcem que l'eix Z apunti al Pacient [0,0,0]
+                        matriu_transductor = look_at_target_relative(p_rel)
+                        
+                        # Creem el paquet d'OpenIGTLink i el disparam per la xarxa TCP
+                        msg_transductor = pyigtl.TransformMessage(matriu_transductor, device_name="TransductorSimulat")
+                        igtl_server.send_message(msg_transductor)
+            
+            # Sincronització a 120 Hz
+            time.sleep(1/120)
+
+    except KeyboardInterrupt:
+        print("\n[INFO] Aturant el pipeline de comunicació de laboratori...")
+        streaming_client.shutdown()

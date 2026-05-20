@@ -1,5 +1,6 @@
 import sys
 import time
+import os
 from NatNetClient import NatNetClient
 
 # Diccionari global per guardar la posició de TOTS els objectes
@@ -84,7 +85,7 @@ if __name__ == "__main__":
         sys.exit(2)
 
     print("\nConnexió establerta. Mostrant dades cada segon...")
-    print("Prems Ctrl+C per aturar.\n")
+    print("Prem Ctrl+C per aturar.\n")
 
     try:
         ID_REFERENCIA = 1  # L'ID que vols que sigui el 0,0,0
@@ -93,7 +94,7 @@ if __name__ == "__main__":
             if not rigid_bodies_data:
                 print("Esperant dades dels objectes...", end="\r")
             elif ID_REFERENCIA not in rigid_bodies_data:
-                print(f"Error: Referència (ID {ID_REFERENCIA}) no trobada.", end="\r")
+                print(f"Error: Referència (ID 1) no trobada.", end="\r")
             else:
                 # 1. Obtenim la posició de la referència per fer el càlcul
                 p_ref = rigid_bodies_data[ID_REFERENCIA][0]
