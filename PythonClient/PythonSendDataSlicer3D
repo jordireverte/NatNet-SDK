@@ -30,8 +30,8 @@ def calculate_absolute_ras_matrix(p_glob, q_glob):
     """
     # 1. Translació absolut i re-mapeig d'eixos (Motive Y-up -> Slicer RAS Z-up)
     p_ras = [
-        p_glob[0] * 1000.0,    # X_slicer = X_motive
-        -p_glob[2] * 1000.0,   # Y_slicer = -Z_motive
+        -p_glob[0] * 1000.0,    # X_slicer = X_motive
+        p_glob[2] * 1000.0,   # Y_slicer = -Z_motive
         p_glob[1] * 1000.0     # Z_slicer = Y_motive
     ]
     
@@ -40,8 +40,8 @@ def calculate_absolute_ras_matrix(p_glob, q_glob):
     
     # 3. Matriu de canvi de base (definida al punt 5.4.3 de la memòria)
     M_remap = np.array([
-        [1,  0,  0],
-        [0,  0, -1],
+        [-1,  0,  0],
+        [0,  0, 1],
         [0,  1,  0]
     ])
     
