@@ -145,7 +145,6 @@ if __name__ == "__main__":
     
     # --- GRÀFICA 2: HISTOGRAMA DE DISTRIBUCIÓ GAUSSIANA ---
     plt.figure(2, figsize=(10, 4))
-    # El density=True fa que represente la densitat de probabilitat (ideal per veure la Gaussiana)
     plt.hist(jitter_x, bins=100, density=True, alpha=0.5, color='#d9534f', label='Distribució X')
     plt.hist(jitter_y, bins=100, density=True, alpha=0.5, color='#5cb85c', label='Distribució Y')
     plt.hist(jitter_z, bins=100, density=True, alpha=0.5, color='#0275d8', label='Distribució Z')
