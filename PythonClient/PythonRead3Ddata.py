@@ -1,5 +1,6 @@
 import sys
 import time
+import os
 from NatNetClient import NatNetClient
 
 # Diccionari global per guardar la posició de TOTS els objectes
@@ -47,6 +48,7 @@ if __name__ == "__main__":
     streaming_client.set_client_address(optionsDict["clientAddress"])
     streaming_client.set_server_address(optionsDict["serverAddress"])
 
+
     print("--- OptiTrack NatNet Minimal Receiver ---")
 
     # 1. Selecció Multicast o Unicast
@@ -71,7 +73,7 @@ if __name__ == "__main__":
 
     # 3. Configuració de Listeners (Només el de Rigid Bodies)
     streaming_client.rigid_body_listener = receive_rigid_body_frame
-
+    streaming_client.set_print_level(0)
     # 4. Iniciar el client en mode 'd' (Data Stream)
     if not streaming_client.run("d"):
         print("ERROR: No s'ha pogut iniciar el client.")
@@ -83,25 +85,44 @@ if __name__ == "__main__":
         sys.exit(2)
 
     print("\nConnexió establerta. Mostrant dades cada segon...")
-    print("Prems Ctrl+C per aturar.\n")
+    print("Prem Ctrl+C per aturar.\n")
 
     try:
+        ID_REFERENCIA = 1  # L'ID que vols que sigui el 0,0,0
+
         while True:
             if not rigid_bodies_data:
-                print("Esperant dades dels objectes...")
+                print("Esperant dades dels objectes...", end="\r")
+            elif ID_REFERENCIA not in rigid_bodies_data:
+                print(f"Error: Referència (ID 1) no trobada.", end="\r")
             else:
-                print("-" * 50)
+                # 1. Obtenim la posició de la referència per fer el càlcul
+                p_ref = rigid_bodies_data[ID_REFERENCIA][0]
+                
+                output_total = "" # Variable per acumular les línies
+                
+                # 2. Recorrem TOTS els cossos rígids
                 for body_id, data in rigid_bodies_data.items():
-                    p = data[0] # Posició (x, y, z)
-                    r = data[1] # Rotació (qx, qy, qz, qw)
+                    p_glob = data[0] # Posició global de Motive
+                    r = data[1]      # Rotació (quaternions)
                     
-                    # AQUÍ ESTÀ EL CANVI: Hem afegit r[0], r[1] i r[2] al print
-                    print(f"Objecte ID {body_id:2}: Pos[{p[0]:6.3f}, {p[1]:6.3f}, {p[2]:6.3f}] | "
-                          f"Rot[{r[0]:6.3f}x, {r[1]:6.3f}y, {r[2]:6.3f}z, {r[3]:6.3f}w]")
+                    # 3. FEM LA RESTA: Posició relativa
+                    p_rel = [
+                        p_glob[0] - p_ref[0],
+                        p_glob[1] - p_ref[1],
+                        p_glob[2] - p_ref[2]
+                    ]
+                    
+                    # 4. Afegim la línia a l'output (la REF sortirà 0,0,0 automàticament)
+                    etiqueta = "REF" if body_id == ID_REFERENCIA else "TRA"
+                    output_total += (f"{etiqueta} (ID {body_id:2}): Pos[{p_rel[0]:6.3f}, {p_rel[1]:6.3f}, {p_rel[2]:6.3f}] | "
+                                     f"Rot[{r[0]:6.3f}x, {r[1]:6.3f}y, {r[2]:6.3f}z, {r[3]:6.3f}w]\n")
+
+                # 5. Netegem i imprimim tot el bloc d'un sol cop
+                os.system('cls' if os.name == 'nt' else 'clear')
+                print(output_total, end="")
             
-            time.sleep(1.0)
+            time.sleep(1/120)
 
     except KeyboardInterrupt:
         print("\nAturant el programa...")
-    finally:
-        streaming_client.shutdown()

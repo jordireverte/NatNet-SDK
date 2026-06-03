@@ -1,0 +1,115 @@
+import sys
+import time
+import math
+import numpy as np
+import pyigtl  # Connexió nativa amb 3D Slicer
+from NatNetClient import NatNetClient
+
+# Diccionari global per guardar el frame actual de Motive
+# Clau: ID de l'objecte, Valor: [posició_global, rotació_quaternion]
+rigid_bodies_data = {}
+
+def receive_rigid_body_frame(new_id, position, rotation):
+    """Callback asíncron que s'executa per cada Rigid Body de Motive."""
+    global rigid_bodies_data
+    rigid_bodies_data[new_id] = [position, rotation]
+
+def quaternion_to_rotation_matrix(q):
+    """Converteix un quaternió [x, y, z, w] de Motive en una matriu de rotació 3x3."""
+    x, y, z, w = q
+    return np.array([
+        [1 - 2*y**2 - 2*z**2,     2*x*y - 2*z*w,         2*x*z + 2*y*w],
+        [2*x*y + 2*z*w,           1 - 2*x**2 - 2*z**2,   2*y*z - 2*x*w],
+        [2*x*z - 2*y*w,           2*y*z + 2*x*w,         1 - 2*x**2 - 2*y**2]
+    ])
+
+def calculate_absolute_ras_matrix(p_glob, q_glob):
+    """
+    Agafa la posició en m i el quaternió de Motive, aplica el canvi de base
+    i retorna la matriu homogènia 4x4 en valor absolut RAS (en mm).
+    """
+    # 1. Translació absolut i re-mapeig d'eixos (Motive Y-up -> Slicer RAS Z-up)
+    p_ras = [
+        -p_glob[0] * 1000.0,    # X_slicer = X_motive
+        p_glob[2] * 1000.0,   # Y_slicer = -Z_motive
+        p_glob[1] * 1000.0     # Z_slicer = Y_motive
+    ]
+    
+    # 2. Convertim el quaternió real de Motive a matriu de rotació 3x3
+    R_motive = quaternion_to_rotation_matrix(q_glob)
+    
+    # 3. Matriu de canvi de base (definida al punt 5.4.3 de la memòria)
+    M_remap = np.array([
+        [-1,  0,  0],
+        [0,  0, 1],
+        [0,  1,  0]
+    ])
+    
+    # 4. S'aplica la transformació de semblança algebraica per a la rotació
+    R_ras = M_remap @ R_motive @ M_remap.T
+    
+    # 5. Construcció de la matriu homogènia final 4x4
+    matrix = np.eye(4)
+    matrix[0:3, 0:3] = R_ras
+    matrix[0:3, 3] = p_ras
+    return matrix
+
+if __name__ == "__main__":
+    optionsDict = {"clientAddress": "127.0.0.1", "serverAddress": "127.0.0.1"}
+    streaming_client = NatNetClient()
+
+    print("====================================================")
+    print("    PIPELINE REAL 6-DOF RAS (MOTIVE -> 3D SLICER)   ")
+    print("====================================================")
+
+    cast_choice = input("Selecciona xarxa de Motive (0 per Multicast, 1 per Unicast): ")
+    optionsDict["use_multicast"] = True if int(cast_choice) == 0 else False
+    streaming_client.set_use_multicast(optionsDict["use_multicast"])
+
+    client_ip = input("IP d'aquest PC (Client) [Intro per 127.0.0.1]: ") or "127.0.0.1"
+    server_ip = input("IP de Motive (Servidor) [Intro per 127.0.0.1]: ") or "127.0.0.1"
+    streaming_client.set_client_address(client_ip)
+    streaming_client.set_server_address(server_ip)
+
+    print(f"\n[INFO] Inicialitzant Servidor OpenIGTLink al port 18944...")
+    igtl_server = pyigtl.OpenIGTLinkServer(port=18944)
+
+    streaming_client.rigid_body_listener = receive_rigid_body_frame
+    streaming_client.set_print_level(0)
+
+    if not streaming_client.run("d"):
+        print("[ERROR] No s'ha pogut arrencar el mòdul NatNetClient.")
+        sys.exit(1)
+
+    time.sleep(1)
+    if not streaming_client.connected():
+        print("[ERROR] Connexió fallida amb Motive.")
+        sys.exit(2)
+
+    print("\n[OK] Pipeline connectat amb èxit reals de rotació actius!")
+    
+    try:
+        ID_PACIENT = 1  # ID de la referència del pacient a Motive
+
+        while True:
+            if rigid_bodies_data:
+                # 1. PROCESSEM I ENVIEM EL PACIENT (SI ESTÀ EN ESCENA)
+                if ID_PACIENT in rigid_bodies_data:
+                    p_pac, q_pac = rigid_bodies_data[ID_PACIENT]
+                    matriu_pacient = calculate_absolute_ras_matrix(p_pac, q_pac)
+                    msg_pacient = pyigtl.TransformMessage(matriu_pacient, device_name="PacientReferencia")
+                    igtl_server.send_message(msg_pacient)
+                
+                # 2. PROCESSEM I ENVIEM LA RESTA DE COSSOS (TRANSDUCTOR)
+                for body_id, data in rigid_bodies_data.items():
+                    if body_id != ID_PACIENT:
+                        p_tra, q_tra = data
+                        matriu_transductor = calculate_absolute_ras_matrix(p_tra, q_tra)
+                        msg_transductor = pyigtl.TransformMessage(matriu_transductor, device_name="TransductorSimulat")
+                        igtl_server.send_message(msg_transductor)
+            
+            time.sleep(1/120)
+
+    except KeyboardInterrupt:
+        print("\n[INFO] Aturant el pipeline...")
+        streaming_client.shutdown()
