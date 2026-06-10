@@ -3,13 +3,10 @@ import time
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # Necessari per al gràfic 3D
+from mpl_toolkits.mplot3d import Axes3D 
 from NatNetClient import NatNetClient
 
-# ====================================================
-# CONFIGURACIÓ DE L'EXPERIMENT (CAPÍTOL 7)
-# ====================================================
-EXPERIMENT_DURATION = 300  # 5 minuts = 300 segons
+EXPERIMENT_DURATION = 300
 TARGET_ID = 1              # ID de l'Stylus
 
 # Llistes globals per a l'acumulació de dades
@@ -46,25 +43,22 @@ if __name__ == "__main__":
     streaming_client.rigid_body_listener = receive_rigid_body_frame
     streaming_client.set_print_level(0)
     
-    print("====================================================")
     print("      TEST AVANÇAT D'ESTABILITAT: JITTER & EXCEL    ")
-    print("====================================================")
-    print(f"[INFO] Connectant per rastejar l'ID {TARGET_ID} en mode Unicast...")
-    
+
     if not streaming_client.run("d"):
         sys.exit(1)
         
     time.sleep(1)
     if not streaming_client.connected():
-        print("[ERROR] Connexió fallida. Revisa que Motive estiga emetent en Unicast.")
+        print("[ERROR] Connexió fallida.")
         sys.exit(2)
         
-    print("\n[OK] Connexió activa. Deixa l'Stylus completament quiet.")
+    print("\n[OK] Connexió activa.")
     
     while start_time is None:
         time.sleep(0.05)
         
-    print("--> [ENREGISTRANT] El temporitzador de 5 minuts està corrent...")
+    print("Temporitzador de 5 minuts ON")
     
     try:
         while True:
@@ -79,7 +73,7 @@ if __name__ == "__main__":
     experiment_running = False
     streaming_client.shutdown()
     
-    print("\n\n[OK] Captura finalitzada. Processant dades...")
+    print("\n\n[OK] Captura finalitzada.")
     
     # Conversió a arrays de Numpy per a càlculs ràpids
     t = np.array(timestamps)
@@ -97,9 +91,7 @@ if __name__ == "__main__":
     
     print(f"\n--> ERROR VOLUMÈTRIC GLOBAL (RMS): {rms_global:.4f} mm")
     
-    # ====================================================
-    # GESTIÓ I EXPORTACIÓ A EXCEL (CSV EUROPEU)
-    # ====================================================
+    # GESTIÓ I EXPORTACIÓ A EXCEL
     nom_fitxer_excel = "dades_jitter_tfg.csv"
     print(f"\n[INFO] Exportant dades a '{nom_fitxer_excel}'...")
     
@@ -123,12 +115,9 @@ if __name__ == "__main__":
                 str(jitter_z[i]).replace('.', ',')
             ])
             
-    print(f"[OK] Fitxer d'Excel desat correctament.")
+    print(f"[OK] Fitxer d'Excel desat.")
 
-    # =======================
-    # GENERACIÓ DE GRÀFIQUES
-    # =======================
-    print("\n[INFO] Generant les 3 gràfiques acadèmiques...")
+    # Generació de gràfiques
     
     # --- GRÀFICA 1: SÈRIE TEMPORAL DEL SOROLL ---
     plt.figure(1, figsize=(10, 4))
@@ -141,7 +130,7 @@ if __name__ == "__main__":
     plt.grid(True, linestyle='--', alpha=0.5)
     plt.legend(loc='upper right')
     plt.xlim(0, EXPERIMENT_DURATION)
-    plt.savefig("jitter_1_temps.png", dpi=300, bbox_inches='tight')
+    plt.savefig("jitter_1_temps.png", dpi=100, bbox_inches='tight')
     
     # --- GRÀFICA 2: HISTOGRAMA DE DISTRIBUCIÓ GAUSSIANA ---
     plt.figure(2, figsize=(10, 4))
@@ -153,6 +142,6 @@ if __name__ == "__main__":
     plt.ylabel("Densitat de freqüència")
     plt.grid(True, linestyle='--', alpha=0.5)
     plt.legend(loc='upper right')
-    plt.savefig("jitter_2_histograma.png", dpi=300, bbox_inches='tight')
+    plt.savefig("jitter_2_histograma.png", dpi=100, bbox_inches='tight')
     
     plt.show()

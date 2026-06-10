@@ -8,7 +8,6 @@ from NatNetClient import NatNetClient
 rigid_bodies_data = {}
 
 def receive_rigid_body_frame(new_id, position, rotation):
-    """Callback que s'executa per cada objecte en cada frame."""
     global rigid_bodies_data
     rigid_bodies_data[new_id] = [position, rotation]
 
@@ -52,10 +51,10 @@ if __name__ == "__main__":
     print("--- OptiTrack NatNet Minimal Receiver ---")
 
     # 1. Selecció Multicast o Unicast
-    cast_choice = input("Select 0 for multicast and 1 for unicast: ")
+    cast_choice = input("Selecciona xarxa de Motive (0 per Multicast, 1 per Unicast):  ")
     cast_choice = int(cast_choice)
     while cast_choice != 0 and cast_choice != 1:
-        cast_choice = input("Invalid option. Select 0 for multicast or 1 for unicast: ") #type: ignore  # noqa F501
+        cast_choice = input("Error: Selecciona xarxa de Motive (0 per Multicast, 1 per Unicast): ") #type: ignore  # noqa F501
         cast_choice = int(cast_choice)
         
     if cast_choice == 0:
@@ -81,14 +80,14 @@ if __name__ == "__main__":
 
     time.sleep(1)
     if not streaming_client.connected():
-        print("ERROR: No s'ha pogut connectar. Revisa el streaming de Motive.")
+        print("ERROR: No s'ha pogut connectar")
         sys.exit(2)
 
-    print("\nConnexió establerta. Mostrant dades cada segon...")
-    print("Prem Ctrl+C per aturar.\n")
+    print("\nConnexió establerta")
+    print("Ctrl+C per aturar.\n")
 
     try:
-        ID_REFERENCIA = 1  # L'ID que vols que sigui el 0,0,0
+        ID_REFERENCIA = 1  # L'ID referencia a 0,0,0
 
         while True:
             if not rigid_bodies_data:
@@ -113,7 +112,7 @@ if __name__ == "__main__":
                         p_glob[2] - p_ref[2]
                     ]
                     
-                    # 4. Afegim la línia a l'output (la REF sortirà 0,0,0 automàticament)
+                    # 4. Afegim la línia a l'output
                     etiqueta = "REF" if body_id == ID_REFERENCIA else "TRA"
                     output_total += (f"{etiqueta} (ID {body_id:2}): Pos[{p_rel[0]:6.3f}, {p_rel[1]:6.3f}, {p_rel[2]:6.3f}] | "
                                      f"Rot[{r[0]:6.3f}x, {r[1]:6.3f}y, {r[2]:6.3f}z, {r[3]:6.3f}w]\n")
