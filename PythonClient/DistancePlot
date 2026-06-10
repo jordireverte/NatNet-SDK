@@ -1,0 +1,182 @@
+import sys
+import time
+import math
+import numpy as np
+import csv
+from datetime import datetime
+from NatNetClient import NatNetClient
+
+# CONFIGURACIÓ
+ID_COS_1 = 1   # ID Rigid Body 1
+ID_COS_2 = 2   # ID Rigid Body 2
+FREQ_HZ  = 120
+N_MOSTRES = 1200   # 10 segons a 120 Hz
+
+DISTANCIES_NOMINALS = [50.0, 75.0, 100.0]  # mm
+
+
+# DICCIONARI GLOBAL 
+rigid_bodies_data = {}
+
+def receive_rigid_body_frame(new_id, position, rotation):
+    global rigid_bodies_data
+    rigid_bodies_data[new_id] = [position, rotation]
+
+# FUNCIONS AUXILIARS
+def distancia_euclidiana(p1, p2):
+    """Distància euclidiana 3D entre dos punts (en mm, Motive en m)."""
+    dx = (p2[0] - p1[0]) * 1000.0
+    dy = (p2[1] - p1[1]) * 1000.0
+    dz = (p2[2] - p1[2]) * 1000.0
+    return math.sqrt(dx**2 + dy**2 + dz**2)
+
+def adquirir_mostres(n_mostres):
+    """Adquireix n_mostres de distància euclidiana entre els dos cossos."""
+    mostres = []
+    print(f"\n  Adquirint {n_mostres} mostres ({n_mostres/FREQ_HZ:.1f} s)...")
+    while len(mostres) < n_mostres:
+        if ID_COS_1 in rigid_bodies_data and ID_COS_2 in rigid_bodies_data:
+            p1 = rigid_bodies_data[ID_COS_1][0]
+            p2 = rigid_bodies_data[ID_COS_2][0]
+            d  = distancia_euclidiana(p1, p2)
+            mostres.append(d)
+            # Barra de progrés simple
+            pct = int(len(mostres) / n_mostres * 40)
+            print(f"  [{'█'*pct}{'░'*(40-pct)}] {len(mostres)}/{n_mostres}", end="\r")
+        time.sleep(1.0 / FREQ_HZ)
+    print()
+    return mostres
+
+def calcular_resultats(mostres, nominal_mm):
+    """Calcula estadístics i retorna un dict de resultats."""
+    arr   = np.array(mostres)
+    mitjana = np.mean(arr)
+    std     = np.std(arr)
+    error_abs = abs(mitjana - nominal_mm)
+    error_rel = (error_abs / nominal_mm) * 100.0
+    return {
+        "nominal":     nominal_mm,
+        "mitjana":     mitjana,
+        "std":         std,
+        "error_abs":   error_abs,
+        "error_rel":   error_rel,
+        "mostres":     mostres
+    }
+
+def esperar_llest(nominal_mm):
+    print(f"\n{'─'*55}")
+    print(f" Col·loca els cossos a la posició de {nominal_mm:.0f} mm")
+    print(f"{'─'*55}")
+    input("  Prem ENTER  ")
+
+def imprimir_resum(resultats_totals):
+    print("\n")
+    print("═"*65)
+    print("  RESULTATS — Validació mètrica de distància relativa")
+    print("═"*65)
+    print(f"  {'Nominal':>12} {'Mitjana':>12} {'Std':>10} {'Err.Abs':>10} {'Err.Rel':>10}")
+    print(f"  {'(mm)':>12} {'(mm)':>12} {'(mm)':>10} {'(mm)':>10} {'(%)':>10}")
+    print("  " + "─"*63)
+    for r in resultats_totals:
+        print(f"  {r['nominal']:>12.3f} {r['mitjana']:>12.4f} {r['std']:>10.4f} "
+              f"{r['error_abs']:>10.4f} {r['error_rel']:>10.4f}")
+    print("═"*65)
+
+def exportar_csv(resultats_totals):
+    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nom = f"validacio_metrica_{ts}.csv"
+    with open(nom, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Nominal (mm)", "Mitjana (mm)", "Std (mm)",
+                    "Error abs (mm)", "Error rel (%)"])
+        for r in resultats_totals:
+            w.writerow([
+                f"{r['nominal']:.3f}",
+                f"{r['mitjana']:.4f}",
+                f"{r['std']:.4f}",
+                f"{r['error_abs']:.4f}",
+                f"{r['error_rel']:.4f}"
+            ])
+    print(f"\n  CSV exportat → {nom}")
+    return nom
+
+def exportar_mostres_csv(resultats_totals):
+    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nom = f"mostres_individuals_{ts}.csv"
+    with open(nom, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Nominal (mm)", "Mostra #", "Distancia (mm)"])
+        for r in resultats_totals:
+            for i, d in enumerate(r["mostres"]):
+                w.writerow([f"{r['nominal']:.0f}", i+1, f"{d:.4f}"])
+    print(f"  Mostres individuals → {nom}")
+
+
+
+# PROGRAMA PRINCIPAL
+if __name__ == "__main__":
+
+    print("VALIDACIÓ MÈTRICA")
+
+    # — Configuració xarxa —
+    cast = input("\nXarxa Motive (0 Multicast / 1 Unicast): ").strip()
+    use_multicast = (int(cast) == 0)
+    client_ip = input("IP Client [127.0.0.1]: ").strip() or "127.0.0.1"
+    server_ip = input("IP Servidor Motive [127.0.0.1]: ").strip() or "127.0.0.1"
+
+    streaming_client = NatNetClient()
+    streaming_client.set_use_multicast(use_multicast)
+    streaming_client.set_client_address(client_ip)
+    streaming_client.set_server_address(server_ip)
+    streaming_client.rigid_body_listener = receive_rigid_body_frame
+    streaming_client.set_print_level(0)
+
+    print("\n  Connectant amb Motive...")
+    if not streaming_client.run("d"):
+        print("  ERROR: No s'ha pogut iniciar NatNet.")
+        sys.exit(1)
+
+    time.sleep(1)
+    if not streaming_client.connected():
+        print("  ERROR: Sense connexió amb Motive. Revisa el streaming.")
+        sys.exit(2)
+
+    print("  Connexió establerta correctament.\n")
+
+    # — Bucle principal de les tres distàncies —
+    resultats_totals = []
+
+    try:
+        for i, nominal in enumerate(DISTANCIES_NOMINALS):
+
+            esperar_llest(nominal)
+
+            # Verificació cossos visibles
+            intents = 0
+            while (ID_COS_1 not in rigid_bodies_data or
+                   ID_COS_2 not in rigid_bodies_data):
+                time.sleep(0.5)
+                intents += 1
+                if intents > 20:
+                    print("\nERROR")
+                    sys.exit(3)
+
+            mostres = adquirir_mostres(N_MOSTRES)
+            r = calcular_resultats(mostres, nominal)
+            resultats_totals.append(r)
+
+    except KeyboardInterrupt:
+        print("\n\n  Adquisició interrompuda per l'usuari.")
+
+    finally:
+        streaming_client.shutdown()
+
+    # — Resultats finals —
+    if resultats_totals:
+        imprimir_resum(resultats_totals)
+        exportar_csv(resultats_totals)
+        exportar_mostres_csv(resultats_totals)
+
+        print("OK")
+    else:
+        print("NOT OK")
